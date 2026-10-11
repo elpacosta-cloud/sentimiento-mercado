@@ -34,3 +34,6 @@ footer { margin-top: 36px; font-size: .8rem; color: var(--suave); }
   .fila { grid-template-columns: 1fr auto; row-gap: 8px; }
   .barra { grid-column: 1 / -1; grid-row: 2; }
 }
+h3 { font-size: .95rem; margin: 16px 0 2px; color: var(--suave); font-weight: 600; }
+.act { margin: 0 0 4px; font-size: .8rem; color: var(--suave); }
+.nodisp { margin: 8px 0 0; padding: 12px 14px; background: var(--papel); border: 1px solid var(--linea); border-radius: 6px; color: var(--suave); }
