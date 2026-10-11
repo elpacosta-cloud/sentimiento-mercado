@@ -67,3 +67,67 @@ export async function datosAcciones() {
   if (comps.length) bloques.push({ titulo: 'Los 7 componentes', items: comps });
   return { bloques, valor: general[0].v, actualizado: hora(fg.timestamp) };
 }
+
+// Paso 5: COT de la CFTC (informe Legacy, solo futuros). Posición neta de los especuladores
+// (no comerciales) comparada con sus últimos 3 años: 0 = muy vendidos, 100 = muy comprados.
+const COT_URL = 'https://publicreporting.cftc.gov/resource/6dca-aqww.json';
+const MERCADOS = {
+  divisas: [
+    ['099741', 'Euro', 'EUR'], ['096742', 'Libra esterlina', 'GBP'], ['097741', 'Yen japonés', 'JPY'],
+    ['232741', 'Dólar australiano', 'AUD'], ['090741', 'Dólar canadiense', 'CAD'],
+    ['092741', 'Franco suizo', 'CHF'], ['098662', 'Índice dólar', 'DXY'],
+  ],
+  materias: [
+    ['088691', 'Oro', 'XAU'], ['084691', 'Plata', 'XAG'], ['067651', 'Petróleo WTI', 'WTI'],
+    ['023651', 'Gas natural', 'NG'], ['085692', 'Cobre', 'HG'],
+  ],
+};
+const fechaCorta = (t) => {
+  const f = new Date(t);
+  return isNaN(f) ? null : 'reporte del ' + new Intl.DateTimeFormat('es-CL', { dateStyle: 'medium', timeZone: 'UTC' }).format(f);
+};
+
+export async function datosCOT() {
+  const todos = [...MERCADOS.divisas, ...MERCADOS.materias];
+  const desde = new Date(Date.now() - 3 * 365 * 864e5).toISOString().slice(0, 10);
+  const params = new URLSearchParams({
+    $select: 'cftc_contract_market_code,report_date_as_yyyy_mm_dd,noncomm_positions_long_all,noncomm_positions_short_all',
+    $where: `cftc_contract_market_code in(${todos.map((m) => `'${m[0]}'`).join(',')}) AND report_date_as_yyyy_mm_dd >= '${desde}T00:00:00.000'`,
+    $order: 'report_date_as_yyyy_mm_dd DESC',
+    $limit: '5000',
+  });
+  let filas;
+  try {
+    const r = await fetch(`${COT_URL}?${params}`, { next: { revalidate: 21600 }, signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return { error: `la CFTC respondió con el código ${r.status}` };
+    filas = await r.json();
+  } catch (e) {
+    return { error: 'no hubo conexión con la CFTC' };
+  }
+  if (!Array.isArray(filas) || filas.length === 0) return { error: 'la CFTC no devolvió datos' };
+
+  const porCodigo = {};
+  for (const f of filas) {
+    const neto = Number(f.noncomm_positions_long_all) - Number(f.noncomm_positions_short_all);
+    if (!Number.isFinite(neto)) continue;
+    (porCodigo[f.cftc_contract_market_code] ||= []).push({ neto, fecha: f.report_date_as_yyyy_mm_dd });
+  }
+  const armar = (lista) => {
+    const items = [];
+    let fecha = null;
+    for (const [codigo, n, s] of lista) {
+      const h = porCodigo[codigo];
+      if (!h || h.length < 20) continue;
+      const netos = h.map((x) => x.neto);
+      const min = Math.min(...netos), max = Math.max(...netos);
+      const v = max === min ? 50 : Math.round(((netos[0] - min) / (max - min)) * 100);
+      items.push({ n, s, v });
+      if (!fecha || h[0].fecha > fecha) fecha = h[0].fecha;
+    }
+    if (!items.length) return null;
+    return { bloques: [{ titulo: null, items }], valor: Math.round(items.reduce((a, i) => a + i.v, 0) / items.length), actualizado: fechaCorta(fecha) };
+  };
+  const divisas = armar(MERCADOS.divisas), materias = armar(MERCADOS.materias);
+  if (!divisas && !materias) return { error: 'no se encontraron los mercados esperados en la respuesta' };
+  return { divisas, materias };
+}
