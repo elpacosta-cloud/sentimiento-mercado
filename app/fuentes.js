@@ -131,3 +131,56 @@ export async function datosCOT() {
   if (!divisas && !materias) return { error: 'no se encontraron los mercados esperados en la respuesta' };
   return { divisas, materias };
 }
+
+// Paso 6: derivados cripto (API pública de OKX, sin clave).
+const OKX = 'https://www.okx.com/api/v5';
+const MONEDAS = [['BTC', 'Bitcoin'], ['ETH', 'Ethereum'], ['SOL', 'Solana']];
+const acotar = (x) => Math.max(0, Math.min(100, Math.round(x)));
+const fmt = (x, d) => new Intl.NumberFormat('es-CL', { minimumFractionDigits: d, maximumFractionDigits: d }).format(x);
+
+async function okx(ruta) {
+  try {
+    const r = await fetch(`${OKX}${ruta}`, { next: { revalidate: 900 }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return { error: `código ${r.status}` };
+    const j = await r.json();
+    if (j.code !== '0' || !Array.isArray(j.data)) return { error: j.msg || 'respuesta inesperada' };
+    return { data: j.data };
+  } catch {
+    return { error: 'sin conexión' };
+  }
+}
+
+async function derivadosMoneda([ccy, nombre]) {
+  const [f, l, o] = await Promise.all([
+    okx(`/public/funding-rate?instId=${ccy}-USDT-SWAP`),
+    okx(`/rubik/stat/contracts/long-short-account-ratio?ccy=${ccy}&period=1H`),
+    okx(`/rubik/stat/contracts/open-interest-volume?ccy=${ccy}&period=1D`),
+  ]);
+  const items = [];
+  const errores = [];
+  // Funding: 0,01 % por período = neutral (50); 0,05 % o más = 100; -0,03 % o menos = 0.
+  const fr = f.data && Number(f.data[0] && f.data[0].fundingRate);
+  if (Number.isFinite(fr)) {
+    const pct = fr * 100;
+    items.push({ n: 'Funding', v: acotar(50 + (pct - 0.01) * 1250), d: `${fmt(pct, 4)} % por período` });
+  } else errores.push(f.error || 'sin dato de funding');
+  // Largos vs cortos: 50 % de cuentas largas = 50; 70 % o más = 100; 30 % o menos = 0.
+  const ratio = l.data && Number(l.data[0] && l.data[0][1]);
+  if (Number.isFinite(ratio) && ratio > 0) {
+    const parte = ratio / (1 + ratio);
+    items.push({ n: 'Largos vs cortos', v: acotar(50 + (parte - 0.5) * 250), d: `${fmt(ratio, 2)} largos por cada corto` });
+  } else errores.push(l.error || 'sin dato de largos y cortos');
+  // Interés abierto: posición del valor actual dentro de los últimos 30 días (0 = el más bajo, 100 = el más alto).
+  const oi = o.data && o.data.slice(0, 30).map((r) => Number(r[1])).filter(Number.isFinite);
+  if (oi && oi.length >= 7) {
+    items.push({ n: 'Interés abierto', v: acotar((oi.filter((x) => x <= oi[0]).length / oi.length) * 100), d: 'frente a los últimos 30 días' });
+  } else errores.push(o.error || 'sin dato de interés abierto');
+  return { bloque: items.length ? { titulo: `${nombre} (${ccy})`, items } : null, errores };
+}
+
+export async function datosDerivados() {
+  const res = await Promise.all(MONEDAS.map(derivadosMoneda));
+  const bloques = res.map((r) => r.bloque).filter(Boolean);
+  if (!bloques.length) return { error: 'OKX: ' + (res.flatMap((r) => r.errores)[0] || 'sin datos') };
+  return { bloques };
+}

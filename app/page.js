@@ -1,7 +1,8 @@
-import { datosCripto, datosAcciones, datosCOT } from './fuentes';
+import { datosCripto, datosAcciones, datosCOT, datosDerivados } from './fuentes';
 import { etiqueta } from './data';
 
-export const revalidate = 1800;
+// Se genera en cada visita; las fuentes se guardan en caché por separado (ver fuentes.js).
+export const dynamic = 'force-dynamic';
 
 function Barra({ v }) {
   return (
@@ -12,13 +13,15 @@ function Barra({ v }) {
 }
 
 export default async function Inicio() {
-  const [cripto, acciones, cot] = await Promise.all([datosCripto(), datosAcciones(), datosCOT()]);
+  const [cripto, acciones, cot, deriv] = await Promise.all([datosCripto(), datosAcciones(), datosCOT(), datosDerivados()]);
+  if (cripto && deriv.bloques) cripto.bloques.push(...deriv.bloques);
+  const explicaCripto = 'Derivados (OKX): funding alto, más cuentas largas que cortas e interés abierto alto frente a lo normal apuntan a codicia; lo contrario, a miedo.';
   const explicaCOT = 'Posición neta de los especuladores frente a sus últimos 3 años. 0 = muy vendidos (miedo), 100 = muy comprados (codicia). Se actualiza una vez por semana.';
   const grupos = [
-    { id: 'cripto', nombre: 'Cripto', fuente: 'Fear & Greed de Alternative.me', datos: cripto },
+    { id: 'cripto', nombre: 'Cripto', fuente: 'Fear & Greed de Alternative.me y derivados de OKX', explica: explicaCripto, nota: deriv.error ? `Derivados no disponibles ahora (${deriv.error}).` : null, datos: cripto },
     { id: 'acciones', nombre: 'Acciones de EE. UU.', fuente: 'Fear & Greed de CNN', datos: acciones },
-    { id: 'divisas', nombre: 'Divisas', fuente: 'COT de la CFTC', explica: explicaCOT, datos: cot.divisas, error: cot.error },
-    { id: 'materias', nombre: 'Materias primas', fuente: 'COT de la CFTC', explica: explicaCOT, datos: cot.materias, error: cot.error },
+    { id: 'divisas', nombre: 'Divisas', fuente: 'COT de la CFTC', explica: explicaCOT, cot: true, datos: cot.divisas, error: cot.error },
+    { id: 'materias', nombre: 'Materias primas', fuente: 'COT de la CFTC', explica: explicaCOT, cot: true, datos: cot.materias, error: cot.error },
   ];
   const reales = grupos.filter((g) => g.datos);
   const global = reales.length ? Math.round(reales.reduce((a, g) => a + g.datos.valor, 0) / reales.length) : null;
@@ -63,14 +66,15 @@ export default async function Inicio() {
             <p className="nodisp">No pudimos obtener estos datos ahora{g.error ? ` (${g.error})` : ''}. Se reintenta automáticamente en unos minutos.</p>
           ) : (
             <>
-              {g.datos.actualizado && <p className="act">Actualizado: {g.datos.actualizado}{g.explica ? '' : ' (hora de Chile)'}</p>}
+              {g.datos.actualizado && <p className="act">Actualizado: {g.datos.actualizado}{g.cot ? '' : ' (hora de Chile)'}</p>}
               {g.explica && <p className="act">{g.explica}</p>}
+              {g.nota && <p className="act">{g.nota}</p>}
               {g.datos.bloques.map((b, k) => (
                 <div key={k}>
                   {b.titulo && <h3>{b.titulo}</h3>}
                   {b.items.map((i) => (
                     <div key={i.n} className="fila">
-                      <div className="nom">{i.n} {i.s && <small>{i.s}</small>}</div>
+                      <div className="nom">{i.n} {i.s && <small>{i.s}</small>}{i.d && <small className="d">{i.d}</small>}</div>
                       <Barra v={i.v} />
                       <div className="val"><strong>{i.v}</strong> {etiqueta(i.v)}</div>
                     </div>
