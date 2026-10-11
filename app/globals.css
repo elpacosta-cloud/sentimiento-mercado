@@ -38,3 +38,7 @@ h3 { font-size: .95rem; margin: 16px 0 2px; color: var(--suave); font-weight: 60
 .act { margin: 0 0 4px; font-size: .8rem; color: var(--suave); }
 .nodisp { margin: 8px 0 0; padding: 12px 14px; background: var(--papel); border: 1px solid var(--linea); border-radius: 6px; color: var(--suave); }
 .nom small.d { display: block; margin: 0; font-size: .78rem; }
+.fila.exp { grid-template-columns: 1fr 140px 130px; }
+.barra.prob { background: var(--linea); }
+.barra.prob i { top: 0; left: 0; height: 100%; margin: 0; border-radius: 4px; background: var(--miedo); }
+@media (max-width: 560px) { .fila.exp { grid-template-columns: 1fr auto; } }

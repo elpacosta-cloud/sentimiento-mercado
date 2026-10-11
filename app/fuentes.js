@@ -158,11 +158,11 @@ async function derivadosMoneda([ccy, nombre]) {
   ]);
   const items = [];
   const errores = [];
-  // Funding: 0,01 % por período = neutral (50); 0,05 % o más = 100; -0,03 % o menos = 0.
+  // Funding: 0 % = neutral (50); +0,05 % o más = 100; -0,05 % o menos = 0.
   const fr = f.data && Number(f.data[0] && f.data[0].fundingRate);
   if (Number.isFinite(fr)) {
     const pct = fr * 100;
-    items.push({ n: 'Funding', v: acotar(50 + (pct - 0.01) * 1250), d: `${fmt(pct, 4)} % por período` });
+    items.push({ n: 'Funding', v: acotar(50 + pct * 1000), d: `${fmt(pct, 4)} % por período` });
   } else errores.push(f.error || 'sin dato de funding');
   // Largos vs cortos: 50 % de cuentas largas = 50; 70 % o más = 100; 30 % o menos = 0.
   const ratio = l.data && Number(l.data[0] && l.data[0][1]);
@@ -182,5 +182,62 @@ export async function datosDerivados() {
   const res = await Promise.all(MONEDAS.map(derivadosMoneda));
   const bloques = res.map((r) => r.bloque).filter(Boolean);
   if (!bloques.length) return { error: 'OKX: ' + (res.flatMap((r) => r.errores)[0] || 'sin datos') };
+  return { bloques };
+}
+
+// Paso 7: expectativas (Polymarket, API pública sin clave). Probabilidad de "Sí" en cada mercado.
+const TEMAS = [
+  ['Fed y tasas de interés', 'Fed interest rate'],
+  ['Bitcoin', 'Bitcoin price'],
+  ['Recesión en EE. UU.', 'US recession'],
+  ['Petróleo', 'crude oil price'],
+  ['Oro', 'gold price'],
+];
+const lista = (x) => {
+  try {
+    const a = typeof x === 'string' ? JSON.parse(x) : x;
+    return Array.isArray(a) ? a : [];
+  } catch {
+    return [];
+  }
+};
+const compacto = (n) => new Intl.NumberFormat('es-CL', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+const fechaMercado = (t) => {
+  const f = new Date(t);
+  return isNaN(f) ? null : new Intl.DateTimeFormat('es-CL', { dateStyle: 'medium', timeZone: 'UTC' }).format(f);
+};
+
+async function temaPolymarket([titulo, q]) {
+  try {
+    const url = `https://gamma-api.polymarket.com/public-search?q=${encodeURIComponent(q)}&events_status=active&limit_per_type=10`;
+    const r = await fetch(url, { next: { revalidate: 1800 }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return { error: `código ${r.status}` };
+    const j = await r.json();
+    const vistos = new Set();
+    const filas = [];
+    for (const m of (j.events || []).flatMap((e) => e.markets || [])) {
+      if (!m || !m.question || m.closed || m.active === false || vistos.has(m.question)) continue;
+      const nombres = lista(m.outcomes).map((x) => String(x).toLowerCase());
+      const precios = lista(m.outcomePrices).map(Number);
+      const i = nombres.indexOf('yes');
+      if (i < 0 || !nombres.includes('no') || !Number.isFinite(precios[i])) continue;
+      if (m.endDate && new Date(m.endDate) < new Date()) continue;
+      const volumen = Number(m.volumeNum ?? m.volume);
+      if (!Number.isFinite(volumen) || volumen < 20000) continue;
+      vistos.add(m.question);
+      const cierre = m.endDate ? fechaMercado(m.endDate) : null;
+      filas.push({ volumen, item: { n: m.question, v: Math.round(precios[i] * 100), d: `${cierre ? `Cierra el ${cierre} · ` : ''}volumen US$ ${compacto(volumen)}` } });
+    }
+    filas.sort((a, b) => b.volumen - a.volumen);
+    return { bloque: filas.length ? { titulo, items: filas.slice(0, 3).map((f) => f.item) } : null };
+  } catch {
+    return { error: 'sin conexión' };
+  }
+}
+
+export async function datosExpectativas() {
+  const res = await Promise.all(TEMAS.map(temaPolymarket));
+  const bloques = res.map((r) => r.bloque).filter(Boolean);
+  if (!bloques.length) return { error: 'Polymarket: ' + (res.find((r) => r.error)?.error || 'no se encontraron mercados relevantes') };
   return { bloques };
 }
