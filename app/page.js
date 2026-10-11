@@ -12,6 +12,10 @@ function Barra({ v, prob }) {
   );
 }
 
+const HISTORIAL = new Set(['Ayer', 'Hace 1 semana', 'Hace 1 mes', 'Cierre anterior', 'Hace 1 año']);
+const GENERICOS = new Set(['Índice general', 'Los 7 componentes']);
+const MENU = { cripto: 'Cripto', acciones: 'Acciones', divisas: 'Divisas', materias: 'Materias primas', expectativas: 'Expectativas' };
+
 export default async function Inicio() {
   const [cripto, acciones, cot, deriv, exp] = await Promise.all([datosCripto(), datosAcciones(), datosCOT(), datosDerivados(), datosExpectativas()]);
   if (cripto && deriv.bloques) cripto.bloques.push(...deriv.bloques);
@@ -31,6 +35,12 @@ export default async function Inicio() {
   const reales = grupos.filter((g) => g.datos && !g.sinPuntaje);
   const global = reales.length ? Math.round(reales.reduce((a, g) => a + g.datos.valor, 0) / reales.length) : null;
 
+  const extremos = reales
+    .flatMap((g) => g.datos.bloques.flatMap((b) => b.items
+      .filter((i) => !HISTORIAL.has(i.n) && (i.v <= 10 || i.v >= 90))
+      .map((i) => ({ v: i.v, texto: b.titulo && !GENERICOS.has(b.titulo) ? `${b.titulo} · ${i.n}` : `${g.nombre} · ${i.n === 'Hoy' ? 'índice general' : i.n}` }))))
+    .sort((a, b) => Math.abs(b.v - 50) - Math.abs(a.v - 50));
+
   return (
     <main>
       <header>
@@ -38,6 +48,10 @@ export default async function Inicio() {
         <p className="sub">Miedo y codicia de todos tus instrumentos en una sola pantalla.</p>
         <p className="aviso">Datos reales de cripto, acciones, divisas y materias primas.</p>
       </header>
+
+      <nav className="menu" aria-label="Secciones">
+        {grupos.map((g) => <a key={g.id} href={`#${g.id}`}>{MENU[g.id]}</a>)}
+      </nav>
 
       <section className="hero" aria-label="Resumen global">
         {global === null ? (
@@ -61,10 +75,34 @@ export default async function Inicio() {
             <li key={g.id}>{g.nombre} <strong>{g.datos.valor}</strong> {etiqueta(g.datos.valor)}</li>
           ))}
         </ul>
+        <details className="como">
+          <summary>¿Cómo se calcula el resumen global?</summary>
+          <p>
+            Es el promedio simple de cuatro grupos. Cripto y Acciones usan su índice Fear & Greed de hoy; Divisas y Materias primas
+            usan el promedio de la posición de los especuladores (COT) de sus instrumentos. Los derivados cripto y las expectativas de
+            Polymarket se muestran aparte y no entran en este número. Es un resumen orientativo, no una señal de compra o venta.
+          </p>
+        </details>
+      </section>
+
+      <section className="extremos" aria-label="Extremos de hoy">
+        <h2>Extremos de hoy</h2>
+        {extremos.length === 0 ? (
+          <p className="act">Ninguna lectura está hoy por debajo de 10 ni por encima de 90.</p>
+        ) : (
+          <>
+            <ul>
+              {extremos.map((e) => (
+                <li key={e.texto}><span>{e.texto}</span><strong className={e.v >= 50 ? 'alto' : 'bajo'}>{e.v}</strong><em>{etiqueta(e.v)}</em></li>
+              ))}
+            </ul>
+            <p className="act">Lecturas por debajo de 10 o por encima de 90. En divisas y materias primas, 0 significa especuladores muy vendidos y 100, muy comprados.</p>
+          </>
+        )}
       </section>
 
       {grupos.map((g) => (
-        <section key={g.id} className="grupo">
+        <section key={g.id} id={g.id} className="grupo">
           <h2>{g.nombre}</h2>
           <p className="fuente">{g.fuente}</p>
           {!g.datos ? (

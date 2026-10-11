@@ -186,12 +186,13 @@ export async function datosDerivados() {
 }
 
 // Paso 7: expectativas (Polymarket, API pública sin clave). Probabilidad de "Sí" en cada mercado.
+// [título, búsqueda, debe contener, no debe contener]: el filtro evita preguntas que solo comparten una palabra.
 const TEMAS = [
-  ['Fed y tasas de interés', 'Fed interest rate'],
-  ['Bitcoin', 'Bitcoin price'],
-  ['Recesión en EE. UU.', 'US recession'],
-  ['Petróleo', 'crude oil price'],
-  ['Oro', 'gold price'],
+  ['Fed y tasas de interés', 'Fed interest rate', /\bfed\b|fomc|interest rate/i, null],
+  ['Bitcoin', 'Bitcoin price', /bitcoin|\bbtc\b/i, /gold|outperform|best performance/i],
+  ['Recesión en EE. UU.', 'US recession', /recession/i, null],
+  ['Petróleo', 'crude oil price', /\boil\b|crude|\bwti\b|brent/i, null],
+  ['Oro', 'gold price', /\bgold\b|\bxau\b/i, /bitcoin|\bbtc\b|ethereum|outperform|best performance/i],
 ];
 const lista = (x) => {
   try {
@@ -207,9 +208,9 @@ const fechaMercado = (t) => {
   return isNaN(f) ? null : new Intl.DateTimeFormat('es-CL', { dateStyle: 'medium', timeZone: 'UTC' }).format(f);
 };
 
-async function temaPolymarket([titulo, q]) {
+async function temaPolymarket([titulo, q, incluye, excluye]) {
   try {
-    const url = `https://gamma-api.polymarket.com/public-search?q=${encodeURIComponent(q)}&events_status=active&limit_per_type=10`;
+    const url = `https://gamma-api.polymarket.com/public-search?q=${encodeURIComponent(q)}&events_status=active&limit_per_type=20`;
     const r = await fetch(url, { next: { revalidate: 1800 }, signal: AbortSignal.timeout(8000) });
     if (!r.ok) return { error: `código ${r.status}` };
     const j = await r.json();
@@ -217,6 +218,8 @@ async function temaPolymarket([titulo, q]) {
     const filas = [];
     for (const m of (j.events || []).flatMap((e) => e.markets || [])) {
       if (!m || !m.question || m.closed || m.active === false || vistos.has(m.question)) continue;
+      if (incluye && !incluye.test(m.question)) continue;
+      if (excluye && excluye.test(m.question)) continue;
       const nombres = lista(m.outcomes).map((x) => String(x).toLowerCase());
       const precios = lista(m.outcomePrices).map(Number);
       const i = nombres.indexOf('yes');
